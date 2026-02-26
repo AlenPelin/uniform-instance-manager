@@ -4,7 +4,7 @@
   "description": "CLI tool for managing Uniform instances",
   "type": "module",
   "bin": {
-    "uniform-instance-manager": "./bin/cli.js"
+    "uim": "./bin/cli.js"
   },
   "scripts": {
     "build": "echo 'No build step needed'"
