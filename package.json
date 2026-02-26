@@ -1,0 +1,15 @@
+{
+  "name": "uniform-instance-manager",
+  "version": "1.0.0",
+  "description": "CLI tool for managing Uniform instances",
+  "type": "module",
+  "bin": {
+    "uniform-instance-manager": "./bin/cli.js"
+  },
+  "scripts": {
+    "build": "echo 'No build step needed'"
+  },
+  "dependencies": {
+    "commander": "^12.0.0"
+  }
+}
