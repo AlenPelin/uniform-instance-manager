@@ -2,7 +2,7 @@ import { program } from 'commander';
 import fs from 'fs';
 import path from 'path';
 import { authenticate } from './auth.js';
-import { saveAuth, loadAuth } from './config.js';
+import { saveAuth, loadAuth, savePref, loadPref } from './config.js';
 import { getUserInfo, getProjectLimits, createProject, deleteProject, addLocale } from './api.js';
 
 program
@@ -34,26 +34,45 @@ program
     }
   });
 
+// ── use-team ───────────────────────────────────────────────────────────────────
+
+program
+  .command('use-team')
+  .argument('<teamId>', 'Team ID to use for subsequent commands')
+  .description('Set the default team ID for project creation')
+  .action((teamId) => {
+    savePref('teamId', teamId);
+    console.log(`Default team set to: ${teamId}`);
+  });
+
 // ── create-project ─────────────────────────────────────────────────────────────
 
 program
   .command('create-project')
   .argument('<name>', 'Name for the new project')
+  .option('--teamId <id>', 'Team ID to create the project in (overrides use-team)')
   .description('Create a Uniform project, register English locale, and write UNIFORM_PROJECT_ID to .env')
-  .action(async (projectName) => {
+  .action(async (projectName, opts) => {
     try {
       const { host, accessToken } = loadAuth();
       console.log(`Creating project "${projectName}" on ${host}...`);
 
-      // 1. Get user info to find team
-      const userInfo = await getUserInfo(host, accessToken);
-      if (!userInfo || !userInfo.teams || userInfo.teams.length === 0) {
-        throw new Error('No teams found for this user. Please create a team first in the Uniform dashboard.');
-      }
+      // Resolve team ID: --teamId flag > use-team pref > auto-detect from first team
+      let teamId = opts.teamId || loadPref('teamId');
+      let teamName;
 
-      const teamId = userInfo.teams[0].team.id;
-      const teamName = userInfo.teams[0].team.name;
-      console.log(`Using team: ${teamName} (${teamId})`);
+      if (teamId) {
+        teamName = teamId;
+        console.log(`Using team: ${teamId}`);
+      } else {
+        const userInfo = await getUserInfo(host, accessToken);
+        if (!userInfo || !userInfo.teams || userInfo.teams.length === 0) {
+          throw new Error('No teams found for this user. Please create a team first in the Uniform dashboard.');
+        }
+        teamId = userInfo.teams[0].team.id;
+        teamName = userInfo.teams[0].team.name;
+        console.log(`Using team: ${teamName} (${teamId})`);
+      }
 
       // 2. Check project limits to get a valid project type
       const limitsData = await getProjectLimits(host, accessToken, teamId);

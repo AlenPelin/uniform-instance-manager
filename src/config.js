@@ -66,3 +66,40 @@ export function loadAuth() {
 
   return authData;
 }
+
+/**
+ * Saves a preference value to disk.
+ *
+ * @param {string} key - The preference key
+ * @param {*} value - The value to store
+ */
+export function savePref(key, value) {
+  const configDir = getConfigDir();
+  const prefsPath = path.join(configDir, PREFS_FILE_NAME);
+
+  let prefs = {};
+  if (fs.existsSync(prefsPath)) {
+    prefs = JSON.parse(fs.readFileSync(prefsPath, "utf-8"));
+  }
+
+  prefs[key] = value;
+
+  if (!fs.existsSync(configDir)) {
+    fs.mkdirSync(configDir, { recursive: true });
+  }
+
+  fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2), "utf-8");
+}
+
+/**
+ * Loads a preference value from disk.
+ *
+ * @param {string} key - The preference key
+ * @returns {*} The stored value, or undefined if not set
+ */
+export function loadPref(key) {
+  const prefsPath = path.join(getConfigDir(), PREFS_FILE_NAME);
+  if (!fs.existsSync(prefsPath)) return undefined;
+  const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf-8"));
+  return prefs[key];
+}
