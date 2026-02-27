@@ -188,19 +188,33 @@ function globToRegex(pattern) {
 program
   .command('ls')
   .argument('[filter]', 'Optional glob filter (e.g. *alen*)')
-  .description('List all projects accessible to the current user')
-  .action(async (filter) => {
+  .option('--allTeams', 'List projects across all teams (default: current team only)')
+  .description('List projects in the current team (use --allTeams for all)')
+  .action(async (filter, opts) => {
     try {
       const { host, accessToken } = loadAuth();
+      const savedTeamId = loadPref('teamId');
+
+      if (!opts.allTeams && !savedTeamId) {
+        throw new Error('No team selected. Run "uim use-team <teamId>" first, or use --allTeams.');
+      }
 
       const userInfo = await getUserInfo(host, accessToken);
       if (!userInfo || !userInfo.teams || userInfo.teams.length === 0) {
         throw new Error('No teams found for this user.');
       }
 
+      const teams = opts.allTeams
+        ? userInfo.teams
+        : userInfo.teams.filter(({ team }) => team.id === savedTeamId);
+
+      if (teams.length === 0) {
+        throw new Error(`Team ${savedTeamId} not found. Run "uim use-team <teamId>" with a valid team or use --allTeams.`);
+      }
+
       const regex = filter ? globToRegex(filter) : null;
 
-      for (const { team } of userInfo.teams) {
+      for (const { team } of teams) {
         const projects = regex
           ? team.sites.filter((s) => regex.test(s.name))
           : team.sites;
