@@ -10,6 +10,26 @@ program
   .description('CLI tool for managing Uniform instances')
   .version('1.0.0');
 
+/**
+ * Write UNIFORM_PROJECT_ID to the .env file in the current directory.
+ */
+function writeProjectToEnv(projectId) {
+  const envPath = path.resolve('.env');
+  let envContent = '';
+  if (fs.existsSync(envPath)) {
+    envContent = fs.readFileSync(envPath, 'utf-8');
+    if (/^UNIFORM_PROJECT_ID=.*/m.test(envContent)) {
+      envContent = envContent.replace(/^UNIFORM_PROJECT_ID=.*/m, `UNIFORM_PROJECT_ID=${projectId}`);
+    } else {
+      envContent = envContent.trimEnd() + '\n' + `UNIFORM_PROJECT_ID=${projectId}\n`;
+    }
+  } else {
+    envContent = `UNIFORM_PROJECT_ID=${projectId}\n`;
+  }
+  fs.writeFileSync(envPath, envContent, 'utf-8');
+  console.log(`UNIFORM_PROJECT_ID=${projectId} written to ${envPath}`);
+}
+
 // ── login ──────────────────────────────────────────────────────────────────────
 
 program
@@ -100,21 +120,7 @@ program
       console.log('Locale registered: English (en)');
 
       // 5. Write UNIFORM_PROJECT_ID to .env in current directory
-      const envPath = path.resolve('.env');
-      let envContent = '';
-      if (fs.existsSync(envPath)) {
-        envContent = fs.readFileSync(envPath, 'utf-8');
-        // Replace existing UNIFORM_PROJECT_ID if present
-        if (/^UNIFORM_PROJECT_ID=.*/m.test(envContent)) {
-          envContent = envContent.replace(/^UNIFORM_PROJECT_ID=.*/m, `UNIFORM_PROJECT_ID=${projectId}`);
-        } else {
-          envContent = envContent.trimEnd() + '\n' + `UNIFORM_PROJECT_ID=${projectId}\n`;
-        }
-      } else {
-        envContent = `UNIFORM_PROJECT_ID=${projectId}\n`;
-      }
-      fs.writeFileSync(envPath, envContent, 'utf-8');
-      console.log(`UNIFORM_PROJECT_ID=${projectId} written to ${envPath}`);
+      writeProjectToEnv(projectId);
 
       console.log('Done.');
     } catch (err) {
@@ -170,6 +176,50 @@ program
       console.log(`Project ${label} deleted successfully.`);
     } catch (err) {
       console.error(`Failed to delete project: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+// ── ls ─────────────────────────────────────────────────────────────────────────
+
+// ── env-project ────────────────────────────────────────────────────────────────
+
+program
+  .command('env-project')
+  .argument('<nameOrId>', 'Project name or UUID')
+  .description('Write UNIFORM_PROJECT_ID to .env in the current directory')
+  .action(async (nameOrId) => {
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nameOrId);
+
+      if (isUuid) {
+        writeProjectToEnv(nameOrId);
+      } else {
+        const { host, accessToken } = loadAuth();
+        const userInfo = await getUserInfo(host, accessToken);
+        if (!userInfo || !userInfo.teams || userInfo.teams.length === 0) {
+          throw new Error('No teams found for this user.');
+        }
+
+        let projectId = null;
+        for (const { team } of userInfo.teams) {
+          const site = team.sites.find((s) => s.name === nameOrId);
+          if (site) {
+            projectId = site.id;
+            break;
+          }
+        }
+
+        if (!projectId) {
+          throw new Error(
+            `Project "${nameOrId}" not found. Use "uim ls --allTeams" to see available projects.`
+          );
+        }
+
+        writeProjectToEnv(projectId);
+      }
+    } catch (err) {
+      console.error(`Failed: ${err.message}`);
       process.exit(1);
     }
   });
