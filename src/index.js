@@ -127,40 +127,47 @@ program
 
 program
   .command('delete-project')
-  .argument('<name>', 'Name of the project to delete')
-  .description('Delete a Uniform project by name')
-  .action(async (projectName) => {
+  .argument('<nameOrId>', 'Project name or UUID to delete')
+  .description('Delete a Uniform project by name or ID')
+  .action(async (nameOrId) => {
     try {
       const { host, accessToken } = loadAuth();
-      console.log(`Looking up project "${projectName}" on ${host}...`);
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nameOrId);
 
-      // Get user info to find the project by name
-      const userInfo = await getUserInfo(host, accessToken);
-      if (!userInfo || !userInfo.teams || userInfo.teams.length === 0) {
-        throw new Error('No teams found for this user.');
-      }
+      let projectId;
+      let label;
 
-      // Search all teams for the project
-      let projectId = null;
-      for (const { team } of userInfo.teams) {
-        const site = team.sites.find((s) => s.name === projectName);
-        if (site) {
-          projectId = site.id;
-          break;
+      if (isUuid) {
+        projectId = nameOrId;
+        label = projectId;
+      } else {
+        console.log(`Looking up project "${nameOrId}" on ${host}...`);
+        const userInfo = await getUserInfo(host, accessToken);
+        if (!userInfo || !userInfo.teams || userInfo.teams.length === 0) {
+          throw new Error('No teams found for this user.');
         }
+
+        for (const { team } of userInfo.teams) {
+          const site = team.sites.find((s) => s.name === nameOrId);
+          if (site) {
+            projectId = site.id;
+            break;
+          }
+        }
+
+        if (!projectId) {
+          throw new Error(
+            `Project "${nameOrId}" not found. Available projects: ${
+              userInfo.teams.flatMap((t) => t.team.sites.map((s) => s.name)).join(', ') || '(none)'
+            }`
+          );
+        }
+        label = `"${nameOrId}" (${projectId})`;
+        console.log(`Found project: ${projectId}`);
       }
 
-      if (!projectId) {
-        throw new Error(
-          `Project "${projectName}" not found. Available projects: ${
-            userInfo.teams.flatMap((t) => t.team.sites.map((s) => s.name)).join(', ') || '(none)'
-          }`
-        );
-      }
-
-      console.log(`Found project: ${projectId}`);
       await deleteProject(host, accessToken, projectId);
-      console.log(`Project "${projectName}" deleted successfully.`);
+      console.log(`Project ${label} deleted successfully.`);
     } catch (err) {
       console.error(`Failed to delete project: ${err.message}`);
       process.exit(1);
