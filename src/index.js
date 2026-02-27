@@ -213,6 +213,7 @@ program
       }
 
       const regex = filter ? globToRegex(filter) : null;
+      let n = 0;
 
       for (const { team } of teams) {
         const projects = regex
@@ -221,9 +222,17 @@ program
 
         if (projects.length === 0) continue;
 
+        // Count total projects across all teams for zero-padding width
+        const totalCount = teams.reduce((sum, { team: t }) => {
+          const s = regex ? t.sites.filter((p) => regex.test(p.name)) : t.sites;
+          return sum + s.length;
+        }, 0);
+        const padWidth = String(totalCount).length;
+
         console.log(`${team.name} (${team.id})`);
         for (const site of projects) {
-          console.log(`  ${site.name}  ${site.id}`);
+          n++;
+          console.log(`  ${String(n).padStart(padWidth, '0')}. ${site.id} ${site.name}`);
         }
       }
     } catch (err) {
