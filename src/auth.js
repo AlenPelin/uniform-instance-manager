@@ -1,5 +1,8 @@
 import https from 'https';
 import crypto from 'crypto';
+import { createInterface } from 'readline';
+import { exec } from 'child_process';
+import { platform } from 'os';
 
 const CLIENT_ID = 'HskAkzfjRf6nF1XVOJVnaifGTFl9QgUR';
 const AUDIENCE = 'https://optimize.uniform.dev';
@@ -295,4 +298,88 @@ export async function authenticate(host, username, password) {
     accessToken: tokenData.access_token,
     expiresIn: tokenData.expires_in,
   };
+}
+
+/**
+ * Open a URL in the user's default browser.
+ */
+function openBrowser(url) {
+  const cmd = platform() === 'win32' ? `start "" "${url}"`
+    : platform() === 'darwin' ? `open "${url}"`
+    : `xdg-open "${url}"`;
+  exec(cmd);
+}
+
+/**
+ * Prompt the user for a line of input (masked).
+ */
+function promptSecret(message) {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    // Mask input by overriding _writeToOutput
+    rl._writeToOutput = (s) => {
+      if (s.includes('\n') || s.includes('\r')) {
+        rl.output.write('\n');
+      } else if (s === message) {
+        rl.output.write(s);
+      } else {
+        rl.output.write('*');
+      }
+    };
+    rl.question(message, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+/**
+ * Authenticate via browser (Google OAuth or any social login).
+ * Opens the Uniform /cli-login page with an optional connection hint,
+ * then prompts the user to paste the access token displayed in the browser.
+ *
+ * @param {string} host - The Uniform host URL.
+ * @param {object} [opts] - Options.
+ * @param {string} [opts.connection] - Auth0 connection hint (e.g. "google-oauth2").
+ * @returns {Promise<{accessToken: string, expiresIn: number}>}
+ */
+export async function authenticateWithBrowser(host, opts = {}) {
+  const origin = new URL(host).origin;
+
+  let loginUrl = `${origin}/cli-login`;
+  if (opts.connection) {
+    loginUrl += `?screen_hint=login&login_hint=&connection=${opts.connection}`;
+  }
+
+  console.log('Opening browser for authentication...');
+  console.log(`If the browser does not open, visit: ${loginUrl}`);
+  openBrowser(loginUrl);
+
+  const token = await promptSecret('Paste your access token: ');
+
+  if (!token) {
+    throw new Error('No token provided.');
+  }
+
+  // Validate it looks like a JWT
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    throw new Error('Invalid token format. Expected a JWT (three dot-separated segments).');
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+  } catch {
+    throw new Error('Invalid token: could not decode JWT payload.');
+  }
+
+  // Calculate expiresIn from the token's exp claim
+  const expiresIn = payload.exp ? payload.exp - Math.floor(Date.now() / 1000) : 86400;
+
+  if (expiresIn <= 0) {
+    throw new Error('Token has already expired.');
+  }
+
+  return { accessToken: token, expiresIn };
 }

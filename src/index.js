@@ -1,7 +1,7 @@
 import { program } from 'commander';
 import fs from 'fs';
 import path from 'path';
-import { authenticate } from './auth.js';
+import { authenticate, authenticateWithBrowser } from './auth.js';
 import { saveAuth, loadAuth, savePref, loadPref } from './config.js';
 import { getUserInfo, getProjectLimits, createProject, deleteProject, addLocale } from './api.js';
 
@@ -16,14 +16,24 @@ program
   .command('login')
   .description('Authenticate with a Uniform instance')
   .requiredOption('--host <url>', 'Uniform host URL (e.g. https://canary.uniform.app/)')
-  .requiredOption('--username <email>', 'Account email address')
-  .requiredOption('--password <password>', 'Account password')
+  .option('--username <email>', 'Account email address')
+  .option('--password <password>', 'Account password')
+  .option('--google', 'Authenticate via Google in the browser')
   .action(async (opts) => {
     try {
       const host = new URL(opts.host).origin; // normalize
-      console.log(`Authenticating as ${opts.username} against ${host}...`);
+      let accessToken, expiresIn;
 
-      const { accessToken, expiresIn } = await authenticate(host, opts.username, opts.password);
+      if (opts.google) {
+        ({ accessToken, expiresIn } = await authenticateWithBrowser(host, { connection: 'google-oauth2' }));
+      } else if (opts.username && opts.password) {
+        console.log(`Authenticating as ${opts.username} against ${host}...`);
+        ({ accessToken, expiresIn } = await authenticate(host, opts.username, opts.password));
+      } else {
+        console.error('Error: provide --username and --password, or use --google');
+        process.exit(1);
+      }
+
       saveAuth(host, accessToken, expiresIn);
 
       console.log(`Login successful. Token expires in ${Math.floor(expiresIn / 3600)} hours.`);
