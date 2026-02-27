@@ -167,4 +167,48 @@ program
     }
   });
 
+// ── ls ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Convert a simple glob pattern (with * wildcards) to a RegExp.
+ * e.g. "*alen*" -> /^.*alen.*$/i
+ */
+function globToRegex(pattern) {
+  const escaped = pattern.replace(/([.+?^${}()|[\]\\])/g, '\\$1').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`, 'i');
+}
+
+program
+  .command('ls')
+  .argument('[filter]', 'Optional glob filter (e.g. *alen*)')
+  .description('List all projects accessible to the current user')
+  .action(async (filter) => {
+    try {
+      const { host, accessToken } = loadAuth();
+
+      const userInfo = await getUserInfo(host, accessToken);
+      if (!userInfo || !userInfo.teams || userInfo.teams.length === 0) {
+        throw new Error('No teams found for this user.');
+      }
+
+      const regex = filter ? globToRegex(filter) : null;
+
+      for (const { team } of userInfo.teams) {
+        const projects = regex
+          ? team.sites.filter((s) => regex.test(s.name))
+          : team.sites;
+
+        if (projects.length === 0) continue;
+
+        console.log(`${team.name} (${team.id})`);
+        for (const site of projects) {
+          console.log(`  ${site.name}  ${site.id}`);
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to list projects: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
 program.parse();
