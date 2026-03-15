@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { authenticate, authenticateWithBrowser } from './auth.js';
 import { saveAuth, loadAuth, savePref, loadPref } from './config.js';
-import { getUserInfo, getProjectLimits, createProject, deleteProject, addLocale } from './api.js';
+import { getUserInfo, getProjectLimits, createProject, deleteProject, addLocale, getProjectMaps, deleteProjectMap } from './api.js';
 
 program
   .name('uniform-instance-manager')
@@ -13,6 +13,8 @@ program
 /**
  * Write UNIFORM_PROJECT_ID to the .env file in the current directory.
  */
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function writeProjectToEnv(projectId) {
   const envPath = path.resolve('.env');
   let envContent = '';
@@ -22,6 +24,13 @@ function writeProjectToEnv(projectId) {
       envContent = envContent.replace(/^UNIFORM_PROJECT_ID=.*/m, `UNIFORM_PROJECT_ID=${projectId}`);
     } else {
       envContent = envContent.trimEnd() + '\n' + `UNIFORM_PROJECT_ID=${projectId}\n`;
+    }
+
+    // If UNIFORM_PREVIEW_SECRET exists and is a valid GUID, update it to match projectId
+    const previewSecretMatch = envContent.match(/^UNIFORM_PREVIEW_SECRET=(.*)$/m);
+    if (previewSecretMatch && GUID_RE.test(previewSecretMatch[1])) {
+      envContent = envContent.replace(/^UNIFORM_PREVIEW_SECRET=.*/m, `UNIFORM_PREVIEW_SECRET=${projectId}`);
+      console.log(`UNIFORM_PREVIEW_SECRET=${projectId} written to ${envPath}`);
     }
   } else {
     envContent = `UNIFORM_PROJECT_ID=${projectId}\n`;
@@ -182,14 +191,18 @@ program
 
 // ── ls ─────────────────────────────────────────────────────────────────────────
 
-// ── env-project ────────────────────────────────────────────────────────────────
+// ── use-project ────────────────────────────────────────────────────────────────
 
 program
-  .command('env-project')
+  .command('use-project')
   .argument('<nameOrId>', 'Project name or UUID')
   .description('Write UNIFORM_PROJECT_ID to .env in the current directory')
   .action(async (nameOrId) => {
     try {
+      const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+      const urlMatch = nameOrId.includes('/') && nameOrId.match(uuidRe);
+      if (urlMatch) nameOrId = urlMatch[0];
+
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nameOrId);
 
       if (isUuid) {
@@ -239,6 +252,7 @@ program
   .command('ls')
   .argument('[filter]', 'Optional glob filter (e.g. *alen*)')
   .option('--allTeams', 'List projects across all teams (default: current team only)')
+  .option('--filter <text>', 'Show only projects whose name or id contains the given text (case-insensitive)')
   .description('List projects in the current team (use --allTeams for all)')
   .action(async (filter, opts) => {
     try {
@@ -263,18 +277,21 @@ program
       }
 
       const regex = filter ? globToRegex(filter) : null;
+      const substring = opts.filter ? opts.filter.toLowerCase() : null;
       let n = 0;
 
       for (const { team } of teams) {
-        const projects = regex
-          ? team.sites.filter((s) => regex.test(s.name))
-          : team.sites;
+        let projects = regex ? team.sites.filter((s) => regex.test(s.name)) : team.sites;
+        if (substring) {
+          projects = projects.filter((s) => s.name.toLowerCase().includes(substring) || s.id.toLowerCase().includes(substring));
+        }
 
         if (projects.length === 0) continue;
 
         // Count total projects across all teams for zero-padding width
         const totalCount = teams.reduce((sum, { team: t }) => {
-          const s = regex ? t.sites.filter((p) => regex.test(p.name)) : t.sites;
+          let s = regex ? t.sites.filter((p) => regex.test(p.name)) : t.sites;
+          if (substring) s = s.filter((p) => p.name.toLowerCase().includes(substring) || p.id.toLowerCase().includes(substring));
           return sum + s.length;
         }, 0);
         const padWidth = String(totalCount).length;
@@ -287,6 +304,59 @@ program
       }
     } catch (err) {
       console.error(`Failed to list projects: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+// ── delete projectmap ───────────────────────────────────────────────────────────
+
+/**
+ * Resolve project ID: --projectId flag > UNIFORM_PROJECT_ID in .env
+ */
+function resolveProjectId(optProjectId) {
+  if (optProjectId) return optProjectId;
+  const envPath = path.resolve('.env');
+  if (fs.existsSync(envPath)) {
+    const match = fs.readFileSync(envPath, 'utf-8').match(/^UNIFORM_PROJECT_ID=(.+)$/m);
+    if (match) return match[1].trim();
+  }
+  throw new Error('No project ID provided. Pass --projectId or set UNIFORM_PROJECT_ID in .env');
+}
+
+const deleteCmd = program.command('delete').description('Delete Uniform resources');
+
+deleteCmd
+  .command('projectmap [id]')
+  .description('Delete a project map (or all project maps with --all)')
+  .option('--projectId <id>', 'Project ID (defaults to UNIFORM_PROJECT_ID from .env)')
+  .option('--all', 'Delete all project maps in the project')
+  .action(async (id, opts) => {
+    try {
+      const { host, accessToken } = loadAuth();
+      const projectId = resolveProjectId(opts.projectId);
+
+      if (opts.all) {
+        const maps = await getProjectMaps(host, accessToken, projectId);
+        if (maps.length === 0) {
+          console.log('No project maps found.');
+          return;
+        }
+        console.log(`Deleting ${maps.length} project map(s)...`);
+        for (const map of maps) {
+          await deleteProjectMap(host, accessToken, projectId, map.id);
+          console.log(`  Deleted: ${map.id}${map.name ? ` (${map.name})` : ''}`);
+        }
+        console.log('Done.');
+      } else {
+        if (!id) {
+          console.error('Error: provide a project map ID or use --all');
+          process.exit(1);
+        }
+        await deleteProjectMap(host, accessToken, projectId, id);
+        console.log(`Project map ${id} deleted successfully.`);
+      }
+    } catch (err) {
+      console.error(`Failed: ${err.message}`);
       process.exit(1);
     }
   });

@@ -160,6 +160,61 @@ export async function deleteProject(host, accessToken, projectId) {
 }
 
 /**
+ * Lists all project maps for a project.
+ *
+ * @param {string} host - The Uniform host URL
+ * @param {string} accessToken - JWT access token
+ * @param {string} projectId - The project ID
+ * @returns {Promise<Array>} Array of project map objects
+ */
+export async function getProjectMaps(host, accessToken, projectId) {
+  const response = await httpRequest(
+    `${host}/api/v1/project-map?projectId=${projectId}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    }
+  );
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(
+      `getProjectMaps failed with status ${response.status}: ${response.body}`
+    );
+  }
+
+  const parsed = JSON.parse(response.body);
+  return parsed.projectMaps ?? parsed;
+}
+
+/**
+ * Deletes a project map.
+ *
+ * @param {string} host - The Uniform host URL
+ * @param {string} accessToken - JWT access token
+ * @param {string} projectId - The project ID
+ * @param {string} projectMapId - The project map ID to delete
+ * @returns {Promise<void>}
+ */
+export async function deleteProjectMap(host, accessToken, projectId, projectMapId) {
+  const response = await httpRequest(`${host}/api/v1/project-map`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ projectId, projectMapId }),
+  });
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(
+      `deleteProjectMap failed with status ${response.status}: ${response.body}`
+    );
+  }
+}
+
+/**
  * Adds a locale to a project.
  *
  * @param {string} host - The Uniform host URL
