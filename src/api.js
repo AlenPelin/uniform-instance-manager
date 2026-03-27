@@ -167,14 +167,12 @@ export async function deleteProject(host, accessToken, projectId) {
  * @param {string} projectId - The project ID
  * @returns {Promise<Array>} Array of project map objects
  */
-export async function getProjectMaps(host, accessToken, projectId) {
+export async function getProjectMaps(host, projectId, authHeaders) {
   const response = await httpRequest(
     `${host}/api/v1/project-map?projectId=${projectId}`,
     {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      headers: authHeaders,
     }
   );
 
@@ -197,13 +195,10 @@ export async function getProjectMaps(host, accessToken, projectId) {
  * @param {string} projectMapId - The project map ID to delete
  * @returns {Promise<void>}
  */
-export async function deleteProjectMap(host, accessToken, projectId, projectMapId) {
+export async function deleteProjectMap(host, projectId, projectMapId, authHeaders) {
   const response = await httpRequest(`${host}/api/v1/project-map`, {
     method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
+    headers: { ...authHeaders, "Content-Type": "application/json" },
     body: JSON.stringify({ projectId, projectMapId }),
   });
 

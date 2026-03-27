@@ -311,16 +311,44 @@ program
 // ── delete projectmap ───────────────────────────────────────────────────────────
 
 /**
+ * Read a value from process.env or from the .env file in the current directory.
+ */
+function readEnvValue(key) {
+  if (process.env[key]) return process.env[key];
+  const envPath = path.resolve('.env');
+  if (fs.existsSync(envPath)) {
+    const match = fs.readFileSync(envPath, 'utf-8').match(new RegExp(`^${key}=(.+)$`, 'm'));
+    if (match) return match[1].trim();
+  }
+  return undefined;
+}
+
+/**
  * Resolve project ID: --projectId flag > UNIFORM_PROJECT_ID in .env
  */
 function resolveProjectId(optProjectId) {
   if (optProjectId) return optProjectId;
-  const envPath = path.resolve('.env');
-  if (fs.existsSync(envPath)) {
-    const match = fs.readFileSync(envPath, 'utf-8').match(/^UNIFORM_PROJECT_ID=(.+)$/m);
-    if (match) return match[1].trim();
-  }
+  const value = readEnvValue('UNIFORM_PROJECT_ID');
+  if (value) return value;
   throw new Error('No project ID provided. Pass --projectId or set UNIFORM_PROJECT_ID in .env');
+}
+
+/**
+ * Resolve host + auth headers for project-map commands.
+ * Priority: --apiKey flag > UNIFORM_API_KEY env/env-file > uim login session.
+ * For API key auth, also resolves host via --host flag > UNIFORM_HOST env/env-file > login session host.
+ */
+function resolveProjectMapAuth(opts) {
+  const apiKey = opts.apiKey || readEnvValue('UNIFORM_API_KEY');
+  if (apiKey) {
+    const host = opts.host || readEnvValue('UNIFORM_HOST');
+    if (!host) {
+      throw new Error('No host provided. Pass --host or set UNIFORM_HOST in .env (or run "uim login").');
+    }
+    return { host: new URL(host).origin, authHeaders: { 'uniform-api-key': apiKey } };
+  }
+  const { host, accessToken } = loadAuth();
+  return { host, authHeaders: { Authorization: `Bearer ${accessToken}` } };
 }
 
 const deleteCmd = program.command('delete').description('Delete Uniform resources');
@@ -330,20 +358,22 @@ deleteCmd
   .description('Delete a project map (or all project maps with --all)')
   .option('--projectId <id>', 'Project ID (defaults to UNIFORM_PROJECT_ID from .env)')
   .option('--all', 'Delete all project maps in the project')
+  .option('--apiKey <key>', 'Uniform API key (overrides uim login; also reads UNIFORM_API_KEY from env/.env)')
+  .option('--host <url>', 'Uniform host URL (required with --apiKey if UNIFORM_HOST is not set)')
   .action(async (id, opts) => {
     try {
-      const { host, accessToken } = loadAuth();
+      const { host, authHeaders } = resolveProjectMapAuth(opts);
       const projectId = resolveProjectId(opts.projectId);
 
       if (opts.all) {
-        const maps = await getProjectMaps(host, accessToken, projectId);
+        const maps = await getProjectMaps(host, projectId, authHeaders);
         if (maps.length === 0) {
           console.log('No project maps found.');
           return;
         }
         console.log(`Deleting ${maps.length} project map(s)...`);
         for (const map of maps) {
-          await deleteProjectMap(host, accessToken, projectId, map.id);
+          await deleteProjectMap(host, projectId, map.id, authHeaders);
           console.log(`  Deleted: ${map.id}${map.name ? ` (${map.name})` : ''}`);
         }
         console.log('Done.');
@@ -352,7 +382,7 @@ deleteCmd
           console.error('Error: provide a project map ID or use --all');
           process.exit(1);
         }
-        await deleteProjectMap(host, accessToken, projectId, id);
+        await deleteProjectMap(host, projectId, id, authHeaders);
         console.log(`Project map ${id} deleted successfully.`);
       }
     } catch (err) {
